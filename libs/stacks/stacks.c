@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "stacks.h"
@@ -25,4 +27,56 @@ void vs_free_stack(struct vs_stack *stack)
 {
     free(stack->data);
     stack->data = 0; // just in case.
+}
+
+// MARK: pools
+
+// declaring global var for stack pools.
+struct stack_pool stack_pool;
+
+#define INIT_POOL_SIZE 8
+
+static void set_free_list(union stack_free_list *frames, size_t n)
+{
+    for (size_t i = 0; i < n - 1; i++)
+    {
+        frames->free = frames + 1;
+        frames++;
+    }
+    frames->free = 0;
+}
+
+// FIXME: implement these!
+stack_id pool_alloc_stack(void)
+{
+    if (!stack_pool.stacks)
+    {
+        stack_pool.stacks = malloc(INIT_STACK_SIZE * sizeof *stack_pool.stacks);
+        set_free_list(stack_pool.stacks, INIT_STACK_SIZE);
+        stack_pool.free = stack_pool.stacks;
+    }
+    if (!stack_pool.free)
+    {
+        if (stack_pool.no_stacks == 1 << 16)
+        {
+            perror("exceeded stack pool.");
+            abort();
+        }
+        // FIXME: grow pool
+        assert(0);
+        stack_pool.free = (union stack_free_list *)42;
+    }
+
+    vs_init_stack(&stack_pool.free->stack);
+    stack_id new_stack = (stack_id)(stack_pool.free - stack_pool.stacks);
+    stack_pool.free = stack_pool.free->free;
+    return new_stack;
+}
+
+void pool_dealloc_stack(stack_id stack)
+{
+    union stack_free_list *s = stack_pool.stacks + stack;
+    vs_free_stack(&s->stack);
+    s->free = stack_pool.free;
+    stack_pool.free = s;
 }

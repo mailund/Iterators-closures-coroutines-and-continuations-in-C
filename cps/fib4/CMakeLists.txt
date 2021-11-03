@@ -1,0 +1,5 @@
+file(GLOB fib_sources *.c)
+add_executable(fib4 ${fib_sources})
+target_link_libraries(fib4 stacks)
+add_test(fib4 fib4)
+set_target_properties(fib4 PROPERTIES FOLDER CPS)

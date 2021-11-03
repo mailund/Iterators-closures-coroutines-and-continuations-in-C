@@ -68,4 +68,51 @@ static inline void *vs_get_stack_frame(struct vs_stack *stack, size_t offset)
     return (char *)stack->data + offset;
 }
 
+// MARK: Pool of stacks
+
+typedef uint16_t stack_id;
+typedef struct
+{
+    // If this doesn't get packed into a 64 bit integer,
+    // use bit shifts and masks to get the same effect.
+    stack_id stack;
+    uint64_t sp : 48;
+} stack_frame;
+
+extern struct stack_pool
+{
+    union stack_free_list
+    {
+        struct vs_stack stack;
+        union stack_free_list *free; // free list
+    } * stacks;
+    union stack_free_list *free; // free list
+    size_t no_stacks;
+} stack_pool;
+
+stack_id pool_alloc_stack(void);
+void pool_dealloc_stack(stack_id stack);
+
+static inline stack_frame pool_stack_alloc_frame_aligned(stack_id stack,
+                                                         size_t frame_size,
+                                                         size_t frame_align)
+{
+    size_t sp = vs_stack_alloc_frame_aligned(&stack_pool.stacks[stack].stack,
+                                             frame_size, frame_align);
+    return (stack_frame){.stack = stack, .sp = sp};
+}
+
+#define pool_stack_alloc_frame_type(STACK_ID, FRAME_TYPE) \
+    pool_stack_alloc_frame_aligned(STACK_ID, sizeof(FRAME_TYPE), alignof(FRAME_TYPE))
+
+static inline void pool_stack_free_frame(stack_frame frame)
+{
+    vs_stack_free_frame(&stack_pool.stacks[frame.stack].stack, frame.sp);
+}
+
+static inline void *pool_get_stack_frame(stack_frame frame)
+{
+    return vs_get_stack_frame(&stack_pool.stacks[frame.stack].stack, frame.sp);
+}
+
 #endif // STACKS_H
