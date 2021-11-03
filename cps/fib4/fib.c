@@ -101,20 +101,6 @@ static inline int fib_cps(int n, closure k)
 
 static inline int fib(int n)
 {
-#if 1
-    // FIXME: remove this
-    const int N = 8;
-    stack_id stacks[N];
-    for (int i = 0; i < N; i++) {
-        stacks[i] = pool_alloc_stack();
-        printf("stack id: %u\n", stacks[i]);
-    }
-    assert(stack_pool.free == 0); // we have taken all.
-    for (int i = 0; i < N; i++) {
-        pool_dealloc_stack(stacks[i]);
-    }
-#endif
-    
     stack_id stack = pool_alloc_stack();
     int res = fib_cps(n, new_closure(stack, ret, ));
     pool_dealloc_stack(stack);
