@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -114,9 +115,97 @@ static inline int cps_sum(struct binary_tree *tree, closure k)
 static inline int sum(struct binary_tree *tree)
 {
     stack_id stack = pool_alloc_stack();
-    int res = cps_sum(tree, new_closure(stack, struct ret_frame, ret, ));
+    int res = cps_sum(tree, new_closure(stack, struct ret_frame,
+                                        .fn = ret, ));
     pool_dealloc_stack(stack);
     return res;
+}
+
+// MARK: Iterator
+struct tree_iter {
+    bool has_more;
+    int current_val;
+    stack_id stack;
+    closure next;
+};
+
+static void traverse(struct tree_iter *itr,
+                     struct binary_tree *tree,
+                     closure k);
+
+typedef void (*tree_iter_fun)(closure, struct tree_iter *);
+struct tree_iter_frame {
+    tree_iter_fun fn;
+};
+
+static void done(closure cl, struct tree_iter *itr);
+// Uses struct tree_iter_frame
+
+static void yield(closure cl, struct tree_iter *itr);
+struct yield_frame {
+    tree_iter_fun fn;
+    struct binary_tree *tree;
+    closure k;
+};
+
+static void resume(closure cl, struct tree_iter *itr);
+struct resume_frame {
+    tree_iter_fun fn;
+    struct binary_tree *tree;
+    closure k;
+};
+
+static void done(closure cl, struct tree_iter *itr)
+{
+    free_closure(cl);
+    itr->has_more = false;
+}
+
+static void yield(closure cl, struct tree_iter *itr)
+{
+    pop_frame(struct yield_frame, cl);
+    itr->has_more = true;
+    itr->current_val = _.tree->val;
+    itr->next = new_closure(_.k.stack, struct resume_frame,
+                            .fn = resume, .tree = _.tree->right, .k = _.k);
+}
+
+static void resume(closure cl, struct tree_iter *itr)
+{
+    pop_frame(struct resume_frame, cl);
+    traverse(itr, _.tree, _.k);
+}
+
+static void traverse(struct tree_iter *itr,
+                     struct binary_tree *tree,
+                     closure k)
+{
+    if (!tree) {
+        call_closure(struct tree_iter_frame, k, itr);
+    } else {
+        traverse(itr, tree->left,
+                 new_closure(k.stack, struct yield_frame,
+                             .fn = yield, .tree = tree, .k = k ));
+    }
+}
+
+// Implementing an iterator from the continuations
+static void init_iter(struct tree_iter *itr, struct binary_tree *tree)
+{
+    itr->stack = pool_alloc_stack();
+    closure k = new_closure(itr->stack, struct tree_iter_frame,
+                            .fn = done);
+    traverse(itr, tree, k); // traverse to first hit
+}
+
+static void next(struct tree_iter *itr)
+{
+    call_closure(struct tree_iter_frame, itr->next, itr);
+}
+
+static void free_iter(struct tree_iter *itr)
+{
+    pool_dealloc_stack(itr->stack);
 }
 
 // MARK: Go!
@@ -129,6 +218,18 @@ int main(void)
     
     printf("rec: %d, cps: %d\n", tree_sum(tree), sum(tree));
     assert(tree_sum(tree) == sum(tree));
+    
+    int s = 0;
+    struct tree_iter itr;
+    init_iter(&itr, tree);
+    for (; itr.has_more; next(&itr)) {
+        printf("%d ", itr.current_val);
+        s += itr.current_val;
+    }
+    putchar('\n');
+    free_iter(&itr);
+    
+    assert(s == sum(tree));
     
     return 0;
 }
