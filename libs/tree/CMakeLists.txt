@@ -1,4 +1,4 @@
-project(stacks
+project(tree
     LANGUAGES   C
 )
 add_library(${PROJECT_NAME} STATIC)
@@ -38,4 +38,4 @@ install(TARGETS   ${PROJECT_NAME}
     COMPONENT     library
 )
 
-set_target_properties(stacks PROPERTIES FOLDER Libraries)
+set_target_properties(tree PROPERTIES FOLDER Libraries)
