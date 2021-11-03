@@ -34,7 +34,7 @@ void vs_free_stack(struct vs_stack *stack)
 // declaring global var for stack pools.
 struct stack_pool stack_pool;
 
-#define INIT_POOL_SIZE 8
+#define INIT_POOL_SIZE 4
 
 static void set_free_list(union stack_free_list *frames, size_t n)
 {
@@ -51,10 +51,11 @@ stack_id pool_alloc_stack(void)
 {
     if (!stack_pool.stacks)
     {
-        stack_pool.stacks = malloc(INIT_STACK_SIZE * sizeof *stack_pool.stacks);
-        set_free_list(stack_pool.stacks, INIT_STACK_SIZE);
+        stack_pool.stacks = malloc(INIT_POOL_SIZE * sizeof *stack_pool.stacks);
+        set_free_list(stack_pool.stacks, INIT_POOL_SIZE);
         stack_pool.free = stack_pool.stacks;
     }
+    
     if (!stack_pool.free)
     {
         if (stack_pool.no_stacks == 1 << 16)
@@ -62,14 +63,21 @@ stack_id pool_alloc_stack(void)
             perror("exceeded stack pool.");
             abort();
         }
-        // FIXME: grow pool
-        assert(0);
-        stack_pool.free = (union stack_free_list *)42;
+        // Grow pool to twice the size.
+        stack_pool.stacks =
+            realloc(stack_pool.stacks,
+                    2 * stack_pool.no_stacks * sizeof *stack_pool.stacks);
+        set_free_list(stack_pool.stacks + stack_pool.no_stacks,
+                      stack_pool.no_stacks);
+        stack_pool.free = stack_pool.stacks + stack_pool.no_stacks;
+        stack_pool.no_stacks *= 2;
     }
 
-    vs_init_stack(&stack_pool.free->stack);
+    union stack_free_list *next_free = stack_pool.free->free;
     stack_id new_stack = (stack_id)(stack_pool.free - stack_pool.stacks);
-    stack_pool.free = stack_pool.free->free;
+    vs_init_stack(&stack_pool.free->stack);
+    stack_pool.free = next_free;
+    stack_pool.no_stacks++;
     return new_stack;
 }
 
@@ -79,4 +87,5 @@ void pool_dealloc_stack(stack_id stack)
     vs_free_stack(&s->stack);
     s->free = stack_pool.free;
     stack_pool.free = s;
+    stack_pool.no_stacks--;
 }
