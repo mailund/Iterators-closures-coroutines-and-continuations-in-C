@@ -1,0 +1,5 @@
+file(GLOB fib_sources *.c)
+add_executable(tree-iter1 ${fib_sources})
+target_link_libraries(tree-iter1 tree stacks)
+add_test(tree-iter1 tree-iter1)
+set_target_properties(tree-iter1 PROPERTIES FOLDER CPS)

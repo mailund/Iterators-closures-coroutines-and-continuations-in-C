@@ -3,5 +3,6 @@ add_subdirectory(fib2)
 add_subdirectory(fib3)
 add_subdirectory(fib4)
 
-add_subdirectory(tree-iter)
+add_subdirectory(tree-iter1)
+add_subdirectory(tree-iter2)
 
