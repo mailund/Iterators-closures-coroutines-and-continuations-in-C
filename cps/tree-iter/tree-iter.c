@@ -35,15 +35,14 @@ typedef stack_frame closure;
 #define call_closure(TYPE, CL, ...) \
     get_closure_frame(TYPE, CL)->fn(CL, __VA_ARGS__)
 
-// FIXME: don't use this compiler extension...
-// clang-format off
-#define new_closure(STACK, TYPE, ...)                          \
-    ({                                                         \
-        closure cl_ = pool_stack_alloc_frame_type(STACK, TYPE); \
-        *get_closure_frame(TYPE, cl_) = (TYPE){__VA_ARGS__};    \
-        cl_;                                                    \
-     })
-// clang-format on
+// Same as the closure creator from the fib example with
+// statement expressions, but without using the compiler
+// extension. We will use it to build frame-specific
+// constructors.
+#define return_new_closure(STACK, TYPE, FN, ...)                  \
+    closure cl = pool_stack_alloc_frame_type(STACK, TYPE);        \
+    *get_closure_frame(TYPE, cl) = (TYPE){.fn = FN, __VA_ARGS__}; \
+    return cl;
 
 static inline void free_closure(closure cl)
 {
@@ -60,23 +59,44 @@ struct tree_frame
 };
 
 static inline int ret(closure cl, int res);
-struct ret_frame {
+struct ret_frame
+{
     tree_fun fn;
 };
+static inline closure new_ret_closure(stack_id stack)
+{
+    return_new_closure(stack, struct ret_frame, ret);
+}
 
 static inline int visit(closure cl, int left_sum);
-struct visit_frame {
+struct visit_frame
+{
     tree_fun fn;
     struct binary_tree *tree;
     closure k;
 };
+static inline closure new_visit_closure(stack_id stack,
+                                        struct binary_tree *tree,
+                                        closure k)
+{
+    return_new_closure(stack, struct visit_frame, visit,
+                       .tree = tree, .k = k);
+}
 
 static inline int add(closure cl, int right_sum);
-struct add_frame {
+struct add_frame
+{
     tree_fun fn;
     int left_sum;
     closure k;
 };
+static inline closure new_add_closure(stack_id stack,
+                                      int left_sum,
+                                      closure k)
+{
+    return_new_closure(stack, struct add_frame, add,
+                       .left_sum = left_sum, .k = k);
+}
 
 // And then the actual application
 static inline int ret(closure cl, int n)
@@ -89,10 +109,7 @@ static inline int visit(closure cl, int left_sum)
 {
     pop_frame(struct visit_frame, cl);
     return cps_sum(_.tree->right,
-                   new_closure(_.k.stack, struct add_frame,
-                               .fn = add,
-                               .left_sum = left_sum + _.tree->val,
-                               .k = _.k));
+                   new_add_closure(_.k.stack, left_sum + _.tree->val, _.k));
 }
 
 static inline int add(closure cl, int right_sum)
@@ -103,26 +120,28 @@ static inline int add(closure cl, int right_sum)
 
 static inline int cps_sum(struct binary_tree *tree, closure k)
 {
-    if (!tree) {
+    if (!tree)
+    {
         return call_closure(struct tree_frame, k, 0);
-    } else {
+    }
+    else
+    {
         return cps_sum(tree->left,
-                       new_closure(k.stack, struct visit_frame,
-                                   .fn = visit, .tree = tree, .k = k));
+                       new_visit_closure(k.stack, tree, k));
     }
 }
 
 static inline int sum(struct binary_tree *tree)
 {
     stack_id stack = pool_alloc_stack();
-    int res = cps_sum(tree, new_closure(stack, struct ret_frame,
-                                        .fn = ret, ));
+    int res = cps_sum(tree, new_ret_closure(stack));
     pool_dealloc_stack(stack);
     return res;
 }
 
 // MARK: Iterator
-struct tree_iter {
+struct tree_iter
+{
     bool has_more;
     int current_val;
     stack_id stack;
@@ -134,26 +153,50 @@ static void traverse(struct tree_iter *itr,
                      closure k);
 
 typedef void (*tree_iter_fun)(closure, struct tree_iter *);
-struct tree_iter_frame {
+struct tree_iter_frame
+{
     tree_iter_fun fn;
 };
 
 static void done(closure cl, struct tree_iter *itr);
-// Uses struct tree_iter_frame
+struct done_frame
+{
+    tree_iter_fun fn;
+};
+static inline closure new_done_closure(stack_id stack)
+{
+    return_new_closure(stack, struct done_frame, done);
+}
 
 static void yield(closure cl, struct tree_iter *itr);
-struct yield_frame {
+struct yield_frame
+{
     tree_iter_fun fn;
     struct binary_tree *tree;
     closure k;
 };
+static inline closure new_yield_closure(stack_id stack,
+                                        struct binary_tree *tree,
+                                        closure k)
+{
+    return_new_closure(stack, struct yield_frame, yield,
+                       .tree = tree, .k = k);
+}
 
 static void resume(closure cl, struct tree_iter *itr);
-struct resume_frame {
+struct resume_frame
+{
     tree_iter_fun fn;
     struct binary_tree *tree;
     closure k;
 };
+static inline closure new_resume_closure(stack_id stack,
+                                         struct binary_tree *tree,
+                                         closure k)
+{
+    return_new_closure(stack, struct resume_frame, resume,
+                       .tree = tree, .k = k);
+}
 
 static void done(closure cl, struct tree_iter *itr)
 {
@@ -166,8 +209,7 @@ static void yield(closure cl, struct tree_iter *itr)
     pop_frame(struct yield_frame, cl);
     itr->has_more = true;
     itr->current_val = _.tree->val;
-    itr->next = new_closure(_.k.stack, struct resume_frame,
-                            .fn = resume, .tree = _.tree->right, .k = _.k);
+    itr->next = new_resume_closure(_.k.stack, _.tree->right, _.k);
 }
 
 static void resume(closure cl, struct tree_iter *itr)
@@ -180,12 +222,14 @@ static void traverse(struct tree_iter *itr,
                      struct binary_tree *tree,
                      closure k)
 {
-    if (!tree) {
+    if (!tree)
+    {
         call_closure(struct tree_iter_frame, k, itr);
-    } else {
+    }
+    else
+    {
         traverse(itr, tree->left,
-                 new_closure(k.stack, struct yield_frame,
-                             .fn = yield, .tree = tree, .k = k ));
+                 new_yield_closure(k.stack, tree, k));
     }
 }
 
@@ -193,8 +237,7 @@ static void traverse(struct tree_iter *itr,
 static void init_iter(struct tree_iter *itr, struct binary_tree *tree)
 {
     itr->stack = pool_alloc_stack();
-    closure k = new_closure(itr->stack, struct tree_iter_frame,
-                            .fn = done);
+    closure k = new_done_closure(itr->stack);
     traverse(itr, tree, k); // traverse to first hit
 }
 
@@ -215,21 +258,22 @@ int main(void)
         new_node(1, new_node(2, NULL, NULL),
                  new_node(3, new_node(4, NULL, NULL),
                           NULL));
-    
+
     printf("rec: %d, cps: %d\n", tree_sum(tree), sum(tree));
     assert(tree_sum(tree) == sum(tree));
-    
+
     int s = 0;
     struct tree_iter itr;
     init_iter(&itr, tree);
-    for (; itr.has_more; next(&itr)) {
+    for (; itr.has_more; next(&itr))
+    {
         printf("%d ", itr.current_val);
         s += itr.current_val;
     }
     putchar('\n');
     free_iter(&itr);
-    
+
     assert(s == sum(tree));
-    
+
     return 0;
 }
