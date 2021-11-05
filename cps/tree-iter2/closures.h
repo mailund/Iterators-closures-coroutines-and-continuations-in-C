@@ -8,9 +8,10 @@
 // First, various auxilary structs, vars and functions
 typedef stack_frame closure;
 // special closure indicating no closure
-const closure nil_closure = { .stack = 0xFFFF, .sp = 0xFFFFFFFFFFFF };
-// FIXME: check what the compiler makes of this!
-static inline bool is_nil_closure(closure cl) {
+const closure nil_closure = {.stack = 0xFFFF, .sp = 0xFFFFFFFFFFFF};
+// The compiler should make this a single 64-bit integer cmp.
+static inline bool is_nil_closure(closure cl)
+{
     return cl.stack == nil_closure.stack && cl.sp == nil_closure.sp;
 }
 
@@ -30,7 +31,7 @@ struct generic_frame
     free_closure(CL);
 
 // Using function type for cast intead of frame
-#define call_closure(FUNTYPE, CL, ...)    \
+#define call_closure(FUNTYPE, CL, ...) \
     ((FUNTYPE)get_closure_frame(struct generic_frame, CL)->fn)(CL mmp_prepend_comma_if_not_nil(__VA_ARGS__))
 
 static inline void free_closure(closure cl)
