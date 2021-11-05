@@ -62,5 +62,7 @@
 // clang-format on
 
 #define mmp_prepend_comma(x) , x
+#define mmp_prepend_comma_if_not_nil(...) \
+    mmp_if_else(mmp_is_nil(__VA_ARGS__))()(, ) __VA_ARGS__
 
 #endif // MMP_H

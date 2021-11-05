@@ -20,162 +20,182 @@ static int tree_sum(struct binary_tree *tree)
     }
 }
 
-// MARK: CPS solution
-
-// MARK: Application code...
-static int cps_sum(struct binary_tree *tree, closure k);
-
-typedef int (*tree_fun)(closure, int);
-struct tree_frame
-{
-    tree_fun fn;
-};
-
-// generated frame definitions...
-declare_new_closure(
-    ret,
-    prototype(static, int, int res),
-    members());
-
-declare_new_closure(
-    visit,
-    prototype(static, int, int left_sum),
-    members(field(struct binary_tree *, tree),
-            field(closure, k)));
-
-declare_new_closure(
-    add,
-    prototype(static, int, int right_sum),
-    members(field(int, left_sum),
-            field(closure, k)));
-
-// And then the actual application
-static inline int ret(closure cl, int n)
-{
-    free_closure(cl);
-    return n;
-}
-
-static inline int visit(closure cl, int left_sum)
-{
-    pop_frame(struct visit_frame, cl);
-    return cps_sum(_.tree->right,
-                   new_add_closure(_.k.stack, left_sum + _.tree->val, _.k));
-}
-
-static inline int add(closure cl, int right_sum)
-{
-    pop_frame(struct add_frame, cl);
-    return call_closure(struct tree_frame, _.k, _.left_sum + right_sum);
-}
-
-static inline int cps_sum(struct binary_tree *tree, closure k)
-{
-    if (!tree)
-    {
-        return call_closure(struct tree_frame, k, 0);
-    }
-    else
-    {
-        return cps_sum(tree->left,
-                       new_visit_closure(k.stack, tree, k));
-    }
-}
-
-static inline int sum(struct binary_tree *tree)
-{
-    stack_id stack = pool_alloc_stack();
-    int res = cps_sum(tree, new_ret_closure(stack));
-    pool_dealloc_stack(stack);
-    return res;
-}
-
 // MARK: Iterator
-struct tree_iter
-{
-    bool has_more;
-    int current_val;
-    stack_id stack;
-    closure next;
-};
+// Implementing an iterator from the continuations, where
+// the continuations do not need to know the iterator implementation
+// and the iterator doesn't need to know about the concrete continuations.
+#define iterator(TYPE)    \
+    struct                \
+    {                     \
+        TYPE current_val; \
+        stack_id stack;   \
+        closure next;     \
+    }
 
-static void traverse(struct tree_iter *itr,
-                     struct binary_tree *tree,
-                     closure k);
+#define new_iterator()              \
+    {                               \
+        .stack = pool_alloc_stack() \
+    }
 
-typedef void (*tree_iter_fun)(closure, struct tree_iter *);
-struct tree_iter_frame
-{
-    tree_iter_fun fn;
-};
+// Prototype for resume functions. The next(it) operator
+// will only call the next closure with itself; any additional
+// data should be stored in the closure when we create it.
+typedef closure (*itr_next_fun)(closure);
 
+// Termination closure. It is application independent, but should
+// handle whatever function type the application uses for
+// continuations, so we use variable length arguments, ..., and
+// then just ignore the arguments.
 declare_new_closure(
     done,
-    prototype(static, void, struct tree_iter *itr),
+    prototype(static, closure, ...),
     members());
+static closure done(closure cl, ...)
+{
+    free_closure(cl);
+    return nil_closure;
+}
+
+#define iterate_with(it, cps, ...)                                            \
+    (it.next = cps(&it.current_val, __VA_ARGS__, new_done_closure(it.stack)), \
+     it.current_val)
+
+#define next(it) \
+    (it.next = call_closure(itr_next_fun, it.next), it.current_val)
+
+#define has_more(it) \
+    !is_nil_closure(it.next)
+
+#define free_iterator(itr) \
+    pool_dealloc_stack(itr.stack)
+
+// MARK: application iteration code
+static closure traverse(int *val,
+                        struct binary_tree *tree,
+                        closure k);
+
+typedef closure (*int_iter_fun)(closure, int *);
+
 declare_new_closure(
     yield,
-    prototype(static, void, struct tree_iter *itr),
+    prototype(static, closure, int *val),
     members(field(struct binary_tree *, tree),
             field(closure, k)));
 declare_new_closure(
     resume,
-    prototype(static, void, struct tree_iter *itr),
-    members(field(struct binary_tree *, tree),
+    prototype(static, closure, ),
+    members(field(int *, val),
+            field(struct binary_tree *, tree),
             field(closure, k)));
 
-// Implementation of closures
-static void done(closure cl, struct tree_iter *itr)
-{
-    free_closure(cl);
-    itr->has_more = false;
-}
-
-static void yield(closure cl, struct tree_iter *itr)
+static closure yield(closure cl, int *val)
 {
     pop_frame(struct yield_frame, cl);
-    itr->has_more = true;
-    itr->current_val = _.tree->val;
-    itr->next = new_resume_closure(_.k.stack, _.tree->right, _.k);
+    *val = _.tree->val;
+    return new_resume_closure(_.k.stack, val, _.tree->right, _.k);
 }
 
-static void resume(closure cl, struct tree_iter *itr)
+static closure resume(closure cl)
 {
     pop_frame(struct resume_frame, cl);
-    traverse(itr, _.tree, _.k);
+    return traverse(_.val, _.tree, _.k);
 }
 
-static void traverse(struct tree_iter *itr,
-                     struct binary_tree *tree,
-                     closure k)
+static closure traverse(int *val,
+                        struct binary_tree *tree,
+                        closure k)
 {
     if (!tree)
     {
-        call_closure(struct tree_iter_frame, k, itr);
+        return call_closure(int_iter_fun, k, val);
     }
     else
     {
-        traverse(itr, tree->left,
-                 new_yield_closure(k.stack, tree, k));
+        return traverse(val, tree->left,
+                        new_yield_closure(k.stack, tree, k));
     }
 }
 
-// Implementing an iterator from the continuations
-static void init_iter(struct tree_iter *itr, struct binary_tree *tree)
+// MARK: list of doubles just to try iterating over a different
+// type. CPS without multiple recursions is silly, but it is just
+// a test...
+struct list
 {
-    itr->stack = pool_alloc_stack();
-    closure k = new_done_closure(itr->stack);
-    traverse(itr, tree, k); // traverse to first hit
+    double d;
+    struct list *next;
+};
+
+static struct list *new_link(double d, struct list *next)
+{
+    struct list *link = malloc(sizeof *link);
+    *link = (struct list){.d = d, .next = next};
+    return link;
 }
 
-static void next(struct tree_iter *itr)
+typedef closure (*double_iter_fun)(closure, double *);
+static closure traverse_list_vals(double *val,
+                                  struct list *list,
+                                  closure k);
+
+declare_new_closure(
+    resume_double,
+    prototype(static, closure, ),
+    members(field(double *, val),
+            field(struct list *, list),
+            field(closure, k)));
+
+static closure resume_double(closure cl)
 {
-    call_closure(struct tree_iter_frame, itr->next, itr);
+    pop_frame(struct resume_double_frame, cl);
+    return traverse_list_vals(_.val, _.list, _.k);
 }
 
-static void free_iter(struct tree_iter *itr)
+static closure traverse_list_vals(double *val,
+                                  struct list *list,
+                                  closure k)
 {
-    pool_dealloc_stack(itr->stack);
+    if (!list)
+    {
+        return call_closure(double_iter_fun, k, val);
+    }
+    else
+    {
+        *val = list->d;
+        return new_resume_double_closure(k.stack, val, list->next, k);
+    }
+}
+
+typedef closure (*link_iter_fun)(closure, struct list **);
+static closure traverse_list_links(struct list **val,
+                                   struct list *list,
+                                   closure k);
+
+declare_new_closure(
+    resume_link,
+    prototype(static, closure),
+    members(field(struct list **, val),
+            field(struct list *, list),
+            field(closure, k)));
+
+static closure resume_link(closure cl)
+{
+    pop_frame(struct resume_link_frame, cl);
+    return traverse_list_links(_.val, _.list, _.k);
+}
+
+static closure traverse_list_links(struct list **val,
+                                   struct list *list,
+                                   closure k)
+{
+    if (!list)
+    {
+        return call_closure(link_iter_fun, k, val);
+    }
+    else
+    {
+        *val = list;
+        return new_resume_link_closure(k.stack, val, list->next, k);
+    }
 }
 
 // MARK: Go!
@@ -186,21 +206,38 @@ int main(void)
                  new_node(3, new_node(4, NULL, NULL),
                           NULL));
 
-    printf("rec: %d, cps: %d\n", tree_sum(tree), sum(tree));
-    assert(tree_sum(tree) == sum(tree));
-
     int s = 0;
-    struct tree_iter itr;
-    init_iter(&itr, tree);
-    for (; itr.has_more; next(&itr))
+    iterator(int) it = new_iterator();
+    for (int i = iterate_with(it, traverse, tree); has_more(it); i = next(it))
     {
-        printf("%d ", itr.current_val);
-        s += itr.current_val;
+        printf("%d ", i);
+        s += i;
     }
-    putchar('\n');
-    free_iter(&itr);
+    printf("\n");
+    free_iterator(it);
 
-    assert(s == sum(tree));
+    assert(s == tree_sum(tree));
+    free_binary_tree(tree);
+
+    struct list *list = new_link(1, new_link(2, new_link(3, NULL)));
+    iterator(double) itr_d = new_iterator();
+    for (double d = iterate_with(itr_d, traverse_list_vals, list);
+         has_more(itr_d); d = next(itr_d))
+    {
+        printf("%f ", d);
+    }
+    printf("\n");
+    free_iterator(itr_d);
+
+    iterator(struct list *) itr_link = new_iterator();
+    for (struct list *link = iterate_with(itr_link, traverse_list_links, list);
+         has_more(itr_link); link = next(itr_link))
+    {
+        printf("%p ", link);
+        free(link);
+    }
+    printf("\n");
+    free_iterator(itr_d);
 
     return 0;
 }
